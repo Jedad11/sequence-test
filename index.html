@@ -45,7 +45,7 @@ const WASD  = {up:'W',left:'A',down:'S',right:'D'};
 const KEYMAP = {ArrowUp:'up',ArrowLeft:'left',ArrowDown:'down',ArrowRight:'right',KeyW:'up',KeyA:'left',KeyS:'down',KeyD:'right'}; // ใช้ e.code เพื่อให้ทำงานแม้คีย์บอร์ดเป็นภาษาไทย
 const app = document.getElementById('app');
 
-let order, modeIdx, round, seq, pos, mistakes, t0, raf, phase, lengths;
+let order, modeIdx, round, seq, pos, mistakes, t0, raf, phase, seqs;
 let results; // {arrow:[{ms,mistakes}], wasd:[...]}
 
 const rnd = n => Math.floor(Math.random()*n);
@@ -58,7 +58,7 @@ function intro(){
     <p>เล่นทั้งสองแบบ แบบละ ${ROUNDS} รอบ รอบละสุ่ม ${MIN_LEN}-${MAX_LEN} ตัว<br>
     กดได้ทั้ง <b>ลูกศร</b> และ <b>WASD</b> (W=↑ A=← S=↓ D=→) ไม่ว่า UI จะโชว์แบบไหน<br>
     ถ้ากดผิด ลำดับจะเริ่มใหม่ตั้งแต่ตัวแรก (เวลายังเดินต่อ)<br>
-    ด่านที่ N ของทั้งสองแบบมีจำนวนคีย์เท่ากัน และเวลาเริ่มนับตอนกดปุ่มแรก (ดู sequence ได้ก่อนโดยไม่เสียเวลา)</p>
+    ด่านที่ N ของทั้งสองแบบมีทิศทางปุ่มชุดเดียวกัน (ต่างกันแค่ UI) และเวลาเริ่มนับตอนกดปุ่มแรก (ดู sequence ได้ก่อนโดยไม่เสียเวลา)</p>
     <button id="start">เริ่มเลย</button>`;
   document.getElementById('start').onclick = startAll;
 }
@@ -66,15 +66,15 @@ function intro(){
 function startAll(){
   order = Math.random()<.5 ? ['arrow','wasd'] : ['wasd','arrow']; // สลับลำดับเพื่อลด bias
   results = {arrow:[],wasd:[]};
-  lengths = Array.from({length:ROUNDS},()=>MIN_LEN + rnd(MAX_LEN-MIN_LEN+1)); // ด่านเดียวกัน จำนวนคีย์เท่ากันทั้งสองโหมด
+  // แต่ละด่านใช้ลำดับทิศทางชุดเดียวกันทั้งสองโหมด (ต่างกันแค่ UI)
+  seqs = Array.from({length:ROUNDS},()=>Array.from({length:MIN_LEN + rnd(MAX_LEN-MIN_LEN+1)},()=>DIRS[rnd(4)]));
   modeIdx = 0; round = 0;
   nextRound();
 }
 
 function nextRound(){
   const mode = order[modeIdx];
-  const len = lengths[round];
-  seq = Array.from({length:len},()=>DIRS[rnd(4)]);
+  seq = seqs[round];
   pos = 0; mistakes = 0; phase='play'; t0 = null;
   render(mode, true);
 }
