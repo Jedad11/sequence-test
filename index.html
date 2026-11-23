@@ -32,6 +32,12 @@
   .box h3{margin:0 0 6px;color:var(--acc)}
   .avg{font-size:1.8rem;font-weight:800}
   .win{outline:2px solid var(--ok)}
+  #lb{margin:18px 0;text-align:left}
+  .lbh{margin:0 0 6px;color:var(--acc);text-align:center}
+  #lb td:nth-child(2){text-align:left}
+  #lb-submit{margin:14px 0}
+  input{background:#2d2750;color:var(--fg);border:2px solid #342e57;border-radius:10px;padding:10px 12px;font-size:1rem;max-width:100%}
+  #sendmsg{color:var(--bad);margin-top:6px}
   @media(max-width:520px){.key{width:46px;height:46px;font-size:1.4rem}.sum{grid-template-columns:1fr}}
 </style>
 </head>
@@ -59,8 +65,9 @@ function intro(){
     กดได้ทั้ง <b>ลูกศร</b> และ <b>WASD</b> (W=↑ A=← S=↓ D=→) ไม่ว่า UI จะโชว์แบบไหน<br>
     ถ้ากดผิด ลำดับจะเริ่มใหม่ตั้งแต่ตัวแรก (เวลายังเดินต่อ)<br>
     ด่านที่ N ของทั้งสองแบบมีทิศทางปุ่มชุดเดียวกัน (ต่างกันแค่ UI) และเวลาเริ่มนับตอนกดปุ่มแรก (ดู sequence ได้ก่อนโดยไม่เสียเวลา)</p>
-    <button id="start">เริ่มเลย</button>`;
+    <button id="start">เริ่มเลย</button><div id="lb"></div>`;
   document.getElementById('start').onclick = startAll;
+  loadBoard();
 }
 
 function startAll(){
@@ -114,8 +121,8 @@ function tick(){
 addEventListener('keydown', e=>{
   const d = KEYMAP[e.code];
   if(!d) return;
-  e.preventDefault();
   if(phase!=='play') return;
+  e.preventDefault();
   if(t0===null){ t0 = performance.now(); document.getElementById('go').textContent='GO!'; tick(); }
   if(d===seq[pos]){
     pos++;
@@ -169,10 +176,62 @@ function showResults(){
   app.innerHTML = `<h1>ผลการทดสอบ</h1>
     <div class="sum">${col('ลูกศร ↑←↓→','arrow',a)}${col('WASD','wasd',w)}</div>
     <p>เฉลี่ย <b>${better}</b> เร็วกว่า ${fmt(diff)} ต่อรอบ</p>
-    <button id="again">เล่นอีกครั้ง</button>`;
+    <div id="lb-submit"></div><div id="lb"></div><button id="again">เล่นอีกครั้ง</button>`;
   document.getElementById('again').onclick = startAll;
+  submitForm(a, w);
+  loadBoard();
 }
 
+// ---------- Leaderboard (Supabase) ----------
+const SB_URL = 'https://jbbowdyzpnfcehzdqytw.supabase.co';
+const SB_KEY = 'sb_publishable_7SVmEo3Uf8NCsmAxgvKmDw_vKVsfs0A'; // publishable key: ปลอดภัยที่จะอยู่ในเว็บ (ตาราง scores เปิด RLS อ่านอย่างเดียว)
+const SB_HEAD = {apikey:SB_KEY, Authorization:'Bearer '+SB_KEY};
+
+async function loadBoard(){
+  const el = document.getElementById('lb'); if(!el) return;
+  el.innerHTML = '<p>กำลังโหลดอันดับ…</p>';
+  try{
+    const r = await fetch(SB_URL+'/rest/v1/scores?select=nickname,total_ms,arrow_total_ms,wasd_total_ms&order=total_ms.asc&limit=20',{headers:SB_HEAD});
+    if(!r.ok) throw new Error(r.status);
+    const rows = await r.json();
+    const box = document.getElementById('lb'); if(!box) return;
+    box.innerHTML = '<h3 class="lbh">Leaderboard (เวลารวม 10 รอบ)</h3>';
+    if(!rows.length){ box.innerHTML += '<p>ยังไม่มีคะแนน มาเป็นคนแรกเลย</p>'; return; }
+    const t = document.createElement('table');
+    t.innerHTML = '<tr><th>#</th><th>ชื่อ</th><th>รวม</th><th>ลูกศร</th><th>WASD</th></tr>';
+    rows.forEach((x,i)=>{
+      const tr = document.createElement('tr');
+      [i+1, x.nickname, fmt(x.total_ms), fmt(x.arrow_total_ms), fmt(x.wasd_total_ms)].forEach(v=>{
+        const td = document.createElement('td'); td.textContent = v; tr.appendChild(td);
+      });
+      t.appendChild(tr);
+    });
+    box.appendChild(t);
+  }catch(err){
+    const box = document.getElementById('lb'); if(box) box.innerHTML = '<p>โหลดอันดับไม่ได้ ลองรีเฟรชหน้า</p>';
+  }
+}
+
+function submitForm(a, w){
+  const box = document.getElementById('lb-submit');
+  box.innerHTML = '<input id="nick" maxlength="16" placeholder="ชื่อเล่น (ไม่เกิน 16 ตัว)" autocomplete="off"> <button id="send">ส่งคะแนน</button> <div id="sendmsg"></div>';
+  document.getElementById('send').onclick = async ()=>{
+    const name = document.getElementById('nick').value.trim();
+    const msg = document.getElementById('sendmsg');
+    if(!name){ msg.textContent = 'ใส่ชื่อเล่นก่อน'; return; }
+    document.getElementById('send').disabled = true;
+    try{
+      const r = await fetch(SB_URL+'/rest/v1/rpc/submit_score',{method:'POST',headers:{...SB_HEAD,'Content-Type':'application/json'},
+        body:JSON.stringify({p_nickname:name,p_arrow_total_ms:Math.round(a.total),p_wasd_total_ms:Math.round(w.total)})});
+      if(!r.ok) throw new Error(r.status);
+      box.innerHTML = '<p>ส่งคะแนนแล้ว</p>';
+      loadBoard();
+    }catch(err){
+      msg.textContent = 'ส่งไม่สำเร็จ ลองใหม่อีกครั้ง';
+      document.getElementById('send').disabled = false;
+    }
+  };
+}
 intro();
 </script>
 </body>
