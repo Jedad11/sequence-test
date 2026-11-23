@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Arrow vs WASD Sequence Test</title>
+<style>
+  :root{--bg:#12101f;--card:#1e1a33;--fg:#f2efff;--mut:#8f89b3;--acc:#ff4fa3;--ok:#3ddc97;--bad:#ff5c5c;--cur:#ffd24a}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:var(--bg);color:var(--fg);font-family:system-ui,"Segoe UI",Tahoma,sans-serif;display:flex;align-items:center;justify-content:center;padding:16px}
+  .wrap{width:100%;max-width:760px;background:var(--card);border-radius:20px;padding:28px;text-align:center}
+  h1{margin:0 0 6px;font-size:1.6rem}
+  p{color:var(--mut);line-height:1.6}
+  button{background:var(--acc);color:#fff;border:0;border-radius:12px;padding:12px 28px;font-size:1.05rem;cursor:pointer;font-weight:600}
+  button:hover{filter:brightness(1.1)}
+  .hud{display:flex;justify-content:space-between;color:var(--mut);font-size:.95rem;margin-bottom:18px}
+  .mode{font-weight:700;color:var(--acc)}
+  .seq{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:22px 0;min-height:76px}
+  .key{width:64px;height:64px;border-radius:14px;background:#2d2750;display:flex;align-items:center;justify-content:center;font-size:2rem;font-weight:800;border:3px solid transparent;transition:.08s}
+  .key.cur{border-color:var(--cur);transform:translateY(-4px)}
+  .key.done{background:var(--ok);color:#0b2a1c}
+  .seq.shake{animation:sh .25s}
+  @keyframes sh{25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
+  .timer{font-size:2.6rem;font-variant-numeric:tabular-nums;font-weight:700}
+  .big{font-size:5rem;font-weight:800;color:var(--cur);margin:30px 0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-variant-numeric:tabular-nums}
+  th,td{padding:8px;border-bottom:1px solid #342e57}
+  th{color:var(--mut);font-weight:600}
+  .sum{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:18px 0}
+  .box{background:#2d2750;border-radius:14px;padding:14px}
+  .box h3{margin:0 0 6px;color:var(--acc)}
+  .avg{font-size:1.8rem;font-weight:800}
+  .win{outline:2px solid var(--ok)}
+  @media(max-width:520px){.key{width:46px;height:46px;font-size:1.4rem}.sum{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+const ROUNDS = 5, MIN_LEN = 6, MAX_LEN = 8;
+const DIRS = ['up','left','down','right'];
+const ARROW = {up:'↑',left:'←',down:'↓',right:'→'};
+const WASD  = {up:'W',left:'A',down:'S',right:'D'};
+const KEYMAP = {ArrowUp:'up',ArrowLeft:'left',ArrowDown:'down',ArrowRight:'right',KeyW:'up',KeyA:'left',KeyS:'down',KeyD:'right'}; // ใช้ e.code เพื่อให้ทำงานแม้คีย์บอร์ดเป็นภาษาไทย
+const app = document.getElementById('app');
+
+let order, modeIdx, round, seq, pos, mistakes, t0, raf, phase, lengths;
+let results; // {arrow:[{ms,mistakes}], wasd:[...]}
+
+const rnd = n => Math.floor(Math.random()*n);
+const fmt = ms => (ms/1000).toFixed(2)+' s';
+
+function intro(){
+  phase='intro';
+  app.innerHTML = `
+    <h1>ทดสอบ Sequence: ลูกศร vs WASD</h1>
+    <p>เล่นทั้งสองแบบ แบบละ ${ROUNDS} รอบ รอบละสุ่ม ${MIN_LEN}-${MAX_LEN} ตัว<br>
+    กดได้ทั้ง <b>ลูกศร</b> และ <b>WASD</b> (W=↑ A=← S=↓ D=→) ไม่ว่า UI จะโชว์แบบไหน<br>
+    ถ้ากดผิด ลำดับจะเริ่มใหม่ตั้งแต่ตัวแรก (เวลายังเดินต่อ)<br>
+    ด่านที่ N ของทั้งสองแบบมีจำนวนคีย์เท่ากัน และเวลาเริ่มนับตอนกดปุ่มแรก (ดู sequence ได้ก่อนโดยไม่เสียเวลา)</p>
+    <button id="start">เริ่มเลย</button>`;
+  document.getElementById('start').onclick = startAll;
+}
+
+function startAll(){
+  order = Math.random()<.5 ? ['arrow','wasd'] : ['wasd','arrow']; // สลับลำดับเพื่อลด bias
+  results = {arrow:[],wasd:[]};
+  lengths = Array.from({length:ROUNDS},()=>MIN_LEN + rnd(MAX_LEN-MIN_LEN+1)); // ด่านเดียวกัน จำนวนคีย์เท่ากันทั้งสองโหมด
+  modeIdx = 0; round = 0;
+  nextRound();
+}
+
+function nextRound(){
+  const mode = order[modeIdx];
+  const len = lengths[round];
+  seq = Array.from({length:len},()=>DIRS[rnd(4)]);
+  pos = 0; mistakes = 0; phase='play'; t0 = null;
+  render(mode, true);
+}
+
+function render(mode, ready){
+  const lab = mode==='arrow' ? 'UI ลูกศร' : 'UI WASD';
+  const map = mode==='arrow' ? ARROW : WASD;
+  app.innerHTML = `
+    <div class="hud"><span class="mode">${lab}</span><span>รอบ ${round+1}/${ROUNDS} · โหมด ${modeIdx+1}/2</span></div>
+    <div class="big" id="go" style="font-size:2rem;margin:6px 0">กดปุ่มแรกเพื่อเริ่มจับเวลา</div>
+    <div class="seq" id="seq">${seq.map((d,i)=>`<div class="key" data-i="${i}">${map[d]}</div>`).join('')}</div>
+    <div class="timer" id="time">0.00 s</div>
+    <p id="hint">ผิด: <span id="mis">0</span></p>`;
+  paint();
+}
+
+function paint(){
+  document.querySelectorAll('.key').forEach((k,i)=>{
+    k.classList.toggle('done', i<pos);
+    k.classList.toggle('cur', i===pos);
+  });
+  const m=document.getElementById('mis'); if(m) m.textContent=mistakes;
+}
+
+function tick(){
+  if(phase!=='play') return;
+  document.getElementById('time').textContent = fmt(performance.now()-t0);
+  raf = requestAnimationFrame(tick);
+}
+
+addEventListener('keydown', e=>{
+  const d = KEYMAP[e.code];
+  if(!d) return;
+  e.preventDefault();
+  if(phase!=='play') return;
+  if(t0===null){ t0 = performance.now(); document.getElementById('go').textContent='GO!'; tick(); }
+  if(d===seq[pos]){
+    pos++;
+    if(pos===seq.length) return finishRound();
+  } else {
+    mistakes++; pos=0;
+    const s=document.getElementById('seq'); s.classList.remove('shake'); void s.offsetWidth; s.classList.add('shake');
+  }
+  paint();
+});
+
+function finishRound(){
+  const ms = performance.now()-t0;
+  phase='between'; cancelAnimationFrame(raf);
+  document.getElementById('time').textContent = fmt(ms);
+  paint();
+  results[order[modeIdx]].push({ms,mistakes,len:seq.length});
+  round++;
+  setTimeout(()=>{
+    if(round>=ROUNDS){ round=0; modeIdx++; }
+    if(modeIdx>=2) return showResults();
+    if(round===0) return modeBreak();
+    nextRound();
+  }, 700);
+}
+
+function modeBreak(){
+  phase='break';
+  const lab = order[modeIdx]==='arrow' ? 'UI ลูกศร' : 'UI WASD';
+  app.innerHTML = `<h1>จบโหมดแรก</h1><p>ต่อไปเป็น <b>${lab}</b> อีก ${ROUNDS} รอบ</p><button id="c">ไปต่อ</button>`;
+  document.getElementById('c').onclick = nextRound;
+}
+
+function stats(r){
+  const total=r.reduce((a,x)=>a+x.ms,0);
+  return {total, avg:total/r.length, mis:r.reduce((a,x)=>a+x.mistakes,0)};
+}
+
+function showResults(){
+  phase='done';
+  const a=stats(results.arrow), w=stats(results.wasd);
+  const col=(name,key,s)=>`
+    <div class="box ${s.avg<(key==='arrow'?w:a).avg?'win':''}">
+      <h3>${name}</h3>
+      <table>${results[key].map((x,i)=>`<tr><td>รอบ ${i+1} (${x.len} ตัว)</td><td>${fmt(x.ms)}</td><td>ผิด ${x.mistakes}</td></tr>`).join('')}</table>
+      <div>รวม <b>${fmt(s.total)}</b></div>
+      <div>เฉลี่ย/รอบ</div><div class="avg">${fmt(s.avg)}</div>
+      <div style="color:var(--mut)">ผิดรวม ${s.mis}</div>
+    </div>`;
+  const diff=Math.abs(a.avg-w.avg), better=a.avg<w.avg?'ลูกศร':'WASD';
+  app.innerHTML = `<h1>ผลการทดสอบ</h1>
+    <div class="sum">${col('ลูกศร ↑←↓→','arrow',a)}${col('WASD','wasd',w)}</div>
+    <p>เฉลี่ย <b>${better}</b> เร็วกว่า ${fmt(diff)} ต่อรอบ</p>
+    <button id="again">เล่นอีกครั้ง</button>`;
+  document.getElementById('again').onclick = startAll;
+}
+
+intro();
+</script>
+</body>
+</html>
